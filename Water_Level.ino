@@ -1,5 +1,7 @@
 #include <NTPClient.h>
 #include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClient.h>
 #include <FirebaseESP8266.h>
 #include <SoftwareSerial.h>
 #include "TFMini.h"
@@ -19,7 +21,8 @@ long interval = 60000*5;
 float distance_m, lastDistance_m, distance_f, change_m, variation_m;
 float actualHeight_m = 3.7, width_m = 4.5, length_m = 7.0, radius_m;
 int level, volume, volumeC = 116550, distance_cm, strength;
-String tankName = "Main Tank 2", currentPath = "/water-tank-info/current/M2", historicalPath = "/water-tank-info/historical/M2/";
+String identifier = "M2";
+String tankName = "Main Tank 2", currentPath = "/water-tank-info/current/"+identifier, historicalPath = "/water-tank-info/historical/"+identifier;
 
 //Define Firebase Data objects
 FirebaseData firebaseData;
@@ -30,24 +33,6 @@ FirebaseJson timeStamp;
 
 void otaSetup() {
     ArduinoOTA.setHostname(tankName.c_str());
-
-    ArduinoOTA.onStart([]() {
-        Serial.println("Start");
-    });
-    ArduinoOTA.onEnd([]() {
-        Serial.println("\nEnd");
-    });
-    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-        Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-    });
-    ArduinoOTA.onError([](ota_error_t error) {
-        Serial.printf("Error[%u]: ", error);
-        if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-        else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-        else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-        else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-        else if (error == OTA_END_ERROR) Serial.println("End Failed");
-    });
     ArduinoOTA.begin();
 }
 
@@ -85,6 +70,16 @@ void setup() {
     timeClient.setTimeOffset(19800);
 }
 
+void dbUpdate(String tankName, float distance, int volume, int level, bool overflowing, bool filling) {
+    HTTPClient http;
+    String data = sensorUpdate+identifier+"/?distance="+(String)distance+"&volume="+(String)volume+"&level="+(String)level+"&overflow="+(String)overflowing+"&filling="+(String)filling+"&tank="+tankName;
+    Serial.println(data);
+    http.begin(data.c_str());
+    int httpResponseCode = http.GET();
+    http.end();
+    Serial.println("DB Update status: " + httpResponseCode);
+}
+
 void updateReadings(String tankName, float distance, int volume, int level, bool overflowing, bool filling, String currentPath, String historicalPath) {
     timeStamp.set(".sv", "timestamp");
     waterLevel.set("distance", distance);
@@ -96,6 +91,7 @@ void updateReadings(String tankName, float distance, int volume, int level, bool
     waterLevel.set("tank", tankName);
     if (Firebase.set(firebaseData, currentPath, waterLevel) && Firebase.push(firebaseData, historicalPath, waterLevel)) Serial.println(firebaseData.jsonString());
     else Serial.println(firebaseData.errorReason());
+    //dbUpdate(tankName, distance, volume, level, overflowing, filling);
 }
 
 float getVolume_Cylinder(float height_m, float radius_m) {
@@ -148,7 +144,7 @@ void loop() {
             Serial.print("L\tLevel = ");
             Serial.print(level);
             Serial.println("%");
-            updateReadings(tankName, round(distance_f), volume, level, false, currentMillis - previousMillis < 60000, currentPath, historicalPath+currentYear+"/"+currentMonth+"/"+monthDay);
+            updateReadings(tankName, round(distance_f), volume, level, false, currentMillis - previousMillis < 60000, currentPath, historicalPath+"/"+currentYear+"/"+currentMonth+"/"+monthDay);
         }
     }
 }
